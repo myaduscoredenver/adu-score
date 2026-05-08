@@ -1,7 +1,7 @@
 import { useState } from "react";
 import Papa from "papaparse";
 
-const CENSUS_GEO = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress";
+const NOMINATIM = "https://nominatim.openstreetmap.org/search";
 
 function toRad(d) { return d * Math.PI / 180; }
 function distance(lat1, lng1, lat2, lng2) {
@@ -13,6 +13,7 @@ function distance(lat1, lng1, lat2, lng2) {
 }
 
 const DENVER_BOUNDS = { minLat: 39.614, maxLat: 39.914, minLng: -105.109, maxLng: -104.600 };
+
 function inDenver(lat, lng) {
   return lat >= DENVER_BOUNDS.minLat && lat <= DENVER_BOUNDS.maxLat &&
          lng >= DENVER_BOUNDS.minLng && lng <= DENVER_BOUNDS.maxLng;
@@ -32,7 +33,7 @@ function calcScore(lot_sf, bldg_sf, year_built) {
   const raw = Math.round(lotScore * 0.45 + ratioScore * 0.35 + ageScore * 0.20);
   const score = Math.min(90, raw);
   const bucket = score >= 65 ? "Likely" : score >= 35 ? "Maybe" : "Unlikely";
-  return { adu_score: score, bucket };
+  return { lot_score: lotScore, ratio_score: ratioScore, age_score: ageScore, adu_score: score, bucket };
 }
 
 const HouseIcon = () => (
@@ -107,8 +108,10 @@ function ResultCard({ result, isSample }) {
   const alleyBonus = alley === true ? 10 : 0;
   const adu_score = Math.min(100, baseScores.adu_score + alleyBonus);
   const bucket = adu_score >= 65 ? "Likely" : adu_score >= 35 ? "Maybe" : "Unlikely";
+
   const bucketColor = bucket === "Likely" ? "#1b4332" : bucket === "Maybe" ? "#7c4a00" : "#7c1a1a";
   const barColor = bucket === "Likely" ? "#2d6a4f" : bucket === "Maybe" ? "#b45309" : "#b91c1c";
+
   const lotPct = Math.min(100, (lotSf / 12000) * 100);
   const ratioPct = lotSf > 0 ? Math.max(0, 100 - (bldgSf / lotSf) * 200) : 50;
   const agePct = yearBuilt > 0 ? Math.min(100, ((2026 - yearBuilt) / 100) * 100) : 50;
@@ -123,7 +126,8 @@ function ResultCard({ result, isSample }) {
   const alleyBtnStyle = (active) => ({
     padding: "8px 20px", fontSize: "13px", borderRadius: "6px", cursor: "pointer",
     fontFamily: "Georgia, serif", border: "0.5px solid #2d6a4f",
-    background: active ? "#2d6a4f" : "white", color: active ? "white" : "#2d6a4f",
+    background: active ? "#2d6a4f" : "white",
+    color: active ? "white" : "#2d6a4f",
     fontWeight: active ? "500" : "400"
   });
 
@@ -216,6 +220,7 @@ export default function App() {
   const [error, setError] = useState("");
   const [searched, setSearched] = useState(false);
   const [suggestion, setSuggestion] = useState(null);
+  const [pendingGeo, setPendingGeo] = useState(null);
 
   function runCsvLookup(userLat, userLng, inputAddress) {
     Papa.parse("/parcels_final.csv", {
@@ -244,22 +249,23 @@ export default function App() {
     setResult(null);
     setError("");
     setSuggestion(null);
+    setPendingGeo(null);
     setSearched(true);
 
     try {
-      const geo = await fetch(`${CENSUS_GEO}?address=${encodeURIComponent(address + " Denver CO")}&benchmark=2020&format=json`);
+      const geo = await fetch(`${NOMINATIM}?q=${encodeURIComponent(address + " Denver CO")}&format=json&limit=1&addressdetails=1`, {
+  headers: { "User-Agent": "myADUscore.com - ADU eligibility tool" }
+});
       const geoData = await geo.json();
-      const match = geoData?.result?.addressMatches?.[0];
 
-      if (!match) {
+      if (!geoData.length) {
         setError("Address not found. Please check the street number and name and try again.");
         setLoading(false);
         return;
       }
 
-      const userLat = parseFloat(match.coordinates.y);
-      const userLng = parseFloat(match.coordinates.x);
-      const matchedAddress = match.matchedAddress || address;
+      const userLat = parseFloat(geoData[0].lat);
+      const userLng = parseFloat(geoData[0].lon);
 
       if (!inDenver(userLat, userLng)) {
         setError("This address doesn't appear to be in Denver. We currently only cover Denver properties.");
@@ -267,14 +273,15 @@ export default function App() {
         return;
       }
 
-      const inputNum = address.trim().match(/^\d+/)?.[0] || "";
-      const matchNum = matchedAddress.match(/^\d+/)?.[0] || "";
-      const inputStreet = address.toLowerCase().replace(/[^a-z]/g, "").slice(0, 6);
-      const matchStreet = matchedAddress.toLowerCase().replace(/[^a-z]/g, "").slice(0, 6);
-      const isCloseMatch = inputNum === matchNum && inputStreet !== matchStreet;
+      const displayName = geoData[0].display_name || "";
+      const shortName = displayName.split(",").slice(0, 2).join(",").trim();
+      const userNum = address.trim().match(/^\d+/)?.[0] || "";
+      const inputClean = address.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+      const geoClean = shortName.toLowerCase().replace(/[^a-z0-9]/g, "");
+      const isCloseMatch = userNum && geoClean.startsWith(userNum) && inputClean.length >= 4 && !geoClean.includes(inputClean);
 
       if (isCloseMatch) {
-        setSuggestion({ shortName: matchedAddress.split(",")[0], lat: userLat, lng: userLng });
+        setSuggestion({ shortName, lat: userLat, lng: userLng });
         setLoading(false);
         return;
       }
@@ -289,9 +296,8 @@ export default function App() {
 
   function confirmSuggestion() {
     setLoading(true);
-    const s = suggestion;
     setSuggestion(null);
-    runCsvLookup(s.lat, s.lng, s.shortName);
+    runCsvLookup(suggestion.lat, suggestion.lng, suggestion.shortName);
   }
 
   function rejectSuggestion() {
@@ -303,6 +309,7 @@ export default function App() {
   return (
     <div style={{ fontFamily: "Georgia, serif", background: "#f7f5f0", minHeight: "100vh" }}>
 
+      {/* NAV */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "16px 20px", background: "white", borderBottom: "0.5px solid #e0ddd8", position: "sticky", top: 0, zIndex: 100 }}>
         <div style={{ textAlign: "center" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "2px" }}>
@@ -314,6 +321,7 @@ export default function App() {
         </div>
       </div>
 
+      {/* HERO */}
       <div style={{ position: "relative", width: "100%", height: "260px", overflow: "hidden" }}>
         <img src="/hero.png" alt="Denver craftsman home with ADU cottage at golden hour" style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "center 40%" }} />
         <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(0,0,0,0.65) 0%, rgba(0,0,0,0.15) 55%, transparent 100%)" }}></div>
@@ -323,6 +331,7 @@ export default function App() {
         </div>
       </div>
 
+      {/* SEARCH */}
       <div style={{ padding: "20px", background: "white", borderBottom: "0.5px solid #e0ddd8" }}>
         <p style={{ fontSize: "14px", color: "#555", margin: "0 0 14px", lineHeight: 1.6 }}>
           Enter your address for an instant eligibility score based on real Denver parcel data — lot size, zoning, and building coverage.
@@ -339,6 +348,7 @@ export default function App() {
         </p>
       </div>
 
+      {/* DID YOU MEAN */}
       {suggestion && (
         <div style={{ padding: "20px" }}>
           <div style={{ background: "white", border: "0.5px solid #c4d4c8", borderRadius: "10px", padding: "16px 20px" }}>
@@ -358,24 +368,28 @@ export default function App() {
         </div>
       )}
 
+      {/* ERROR */}
       {error && (
         <div style={{ padding: "20px" }}>
           <p style={{ color: "#b91c1c", fontSize: "13px", margin: 0, padding: "12px 16px", background: "#fef2f2", borderRadius: "8px", border: "0.5px solid #fecaca" }}>{error}</p>
         </div>
       )}
 
+      {/* LIVE RESULT */}
       {result && (
         <div style={{ padding: "20px", background: "#f7f5f0" }}>
           <ResultCard result={result} isSample={false} />
         </div>
       )}
 
+      {/* SAMPLE */}
       {!searched && (
         <div style={{ padding: "20px", background: "#f7f5f0", borderBottom: "0.5px solid #e0ddd8" }}>
           <ResultCard result={SAMPLE} isSample={true} />
         </div>
       )}
 
+      {/* HOW IT WORKS */}
       <div style={{ padding: "28px 20px", background: "white", borderBottom: "0.5px solid #e0ddd8" }}>
         <p style={{ fontSize: "11px", letterSpacing: "0.1em", color: "#aaa", textTransform: "uppercase", margin: "0 0 20px", textAlign: "center" }}>How it works</p>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "16px", textAlign: "center" }}>
@@ -395,6 +409,7 @@ export default function App() {
         </div>
       </div>
 
+      {/* STATS */}
       <div style={{ padding: "20px", display: "flex", justifyContent: "space-between", background: "#f7f5f0", borderBottom: "0.5px solid #e0ddd8" }}>
         {[["187k", "parcels scored"], ["Free", "always"], ["Instant", "real parcel data"]].map(([val, label]) => (
           <div key={label} style={{ textAlign: "center", flex: 1 }}>
@@ -404,6 +419,7 @@ export default function App() {
         ))}
       </div>
 
+      {/* SEO */}
       <div style={{ padding: "24px 20px", background: "white", borderBottom: "0.5px solid #e0ddd8" }}>
         <h2 style={{ fontSize: "18px", fontWeight: "400", color: "#1a1a1a", margin: "0 0 12px" }}>ADU rules in Denver, Colorado (2026)</h2>
         <p style={{ fontSize: "13px", color: "#555", margin: "0 0 12px", lineHeight: 1.75 }}>Denver's accessory dwelling unit ordinance allows homeowners in most single-family residential zones to add a secondary unit — attached or detached — to their property. Denver ADU zoning districts including E-SU-B, E-SU-D, E-SU-DX, and E-SU-G permit both attached and detached ADUs by right, with no special approval required.</p>
@@ -414,6 +430,7 @@ export default function App() {
         <p style={{ fontSize: "13px", color: "#555", margin: 0, lineHeight: 1.75 }}><strong style={{ fontWeight: "500", color: "#1a1a1a" }}>Does Denver allow detached ADUs?</strong> Yes. Denver permits detached accessory dwelling units — backyard cottages or carriage houses — in most residential zones. Detached ADUs cannot exceed 50% of the primary home's floor area and must meet setback requirements.</p>
       </div>
 
+      {/* DISCLAIMER */}
       <div style={{ padding: "20px", background: "#f7f5f0", borderBottom: "0.5px solid #e0ddd8" }}>
         <div style={{ borderLeft: "2px solid #c4d4c8", paddingLeft: "12px" }}>
           <p style={{ fontSize: "11px", color: "#999", margin: 0, lineHeight: 1.7 }}>
@@ -422,6 +439,7 @@ export default function App() {
         </div>
       </div>
 
+      {/* FOOTER */}
       <div style={{ padding: "24px 20px", textAlign: "center", background: "white" }}>
         <p style={{ fontSize: "14px", fontWeight: "500", color: "#1a1a1a", margin: "0 0 4px" }}>myADUscore.com</p>
         <p style={{ fontSize: "11px", color: "#aaa", margin: "0 0 12px" }}>Denver · More cities coming soon</p>
