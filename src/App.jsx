@@ -12,6 +12,13 @@ function distance(lat1, lng1, lat2, lng2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 
+const DENVER_BOUNDS = { minLat: 39.614, maxLat: 39.914, minLng: -105.109, maxLng: -104.600 };
+
+function inDenver(lat, lng) {
+  return lat >= DENVER_BOUNDS.minLat && lat <= DENVER_BOUNDS.maxLat &&
+         lng >= DENVER_BOUNDS.minLng && lng <= DENVER_BOUNDS.maxLng;
+}
+
 const SAMPLE = {
   address: "2847 S Humboldt St", city: "Denver", lot_sf: 9200, bldg_sf: 1650,
   year_built: 1941, zone: "E-SU-DX", lot_score: 82, ratio_score: 75,
@@ -23,7 +30,8 @@ function calcScore(lot_sf, bldg_sf, year_built) {
   const ratio = lot_sf > 0 ? bldg_sf / lot_sf : 0;
   const ratioScore = ratio > 0.40 ? 0 : ratio > 0.25 ? 30 : ratio > 0.15 ? 60 : 100;
   const ageScore = !year_built || year_built == 0 ? 50 : year_built >= 2000 ? 10 : year_built >= 1980 ? 30 : year_built >= 1960 ? 65 : 100;
-  const score = Math.round(lotScore * 0.45 + ratioScore * 0.35 + ageScore * 0.20);
+  const raw = Math.round(lotScore * 0.45 + ratioScore * 0.35 + ageScore * 0.20);
+  const score = Math.min(90, raw);
   const bucket = score >= 65 ? "Likely" : score >= 35 ? "Maybe" : "Unlikely";
   return { lot_score: lotScore, ratio_score: ratioScore, age_score: ageScore, adu_score: score, bucket };
 }
@@ -60,7 +68,7 @@ function ScoreBar({ label, value, score, note, color, onEdit, edited }) {
     <div style={{ marginBottom: "14px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "5px" }}>
         <span style={{ fontSize: "13px", fontWeight: "500", color: "#1a1a1a" }}>{label}</span>
-        <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+        <div style={{ display: "flex", alignItems: "center" }}>
           <span style={{ fontSize: "13px", color: "#555" }}>{value}{edited && <span style={{ fontSize: "10px", color: "#b45309", marginLeft: "4px" }}>edited</span>}</span>
           {onEdit && editBtn(onEdit)}
         </div>
@@ -78,12 +86,8 @@ function EditField({ label, value, onChange, onDone, unit }) {
     <div style={{ marginBottom: "14px", background: "#f0f7f4", borderRadius: "8px", padding: "10px 12px", border: "0.5px solid #c4d4c8" }}>
       <p style={{ fontSize: "11px", color: "#2d6a4f", margin: "0 0 6px", fontWeight: "500" }}>Edit {label}</p>
       <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-        <input
-          type="number"
-          value={value}
-          onChange={e => onChange(e.target.value)}
-          style={{ flex: 1, padding: "8px 10px", fontSize: "13px", border: "1px solid #c4d4c8", borderRadius: "6px", fontFamily: "Georgia, serif", outline: "none" }}
-        />
+        <input type="number" value={value} onChange={e => onChange(e.target.value)}
+          style={{ flex: 1, padding: "8px 10px", fontSize: "13px", border: "1px solid #c4d4c8", borderRadius: "6px", fontFamily: "Georgia, serif", outline: "none" }} />
         {unit && <span style={{ fontSize: "12px", color: "#888" }}>{unit}</span>}
         <button onClick={onDone} style={{ padding: "8px 12px", background: "#2d6a4f", color: "white", border: "none", borderRadius: "6px", fontSize: "12px", cursor: "pointer", fontFamily: "Georgia, serif" }}>Done</button>
       </div>
@@ -98,9 +102,12 @@ function ResultCard({ result, isSample }) {
   const [yearBuilt, setYearBuilt] = useState(parseFloat(result.year_built) || 0);
   const [editedFields, setEditedFields] = useState({});
   const [isEdited, setIsEdited] = useState(false);
+  const [alley, setAlley] = useState(null);
 
-  const scores = calcScore(lotSf, bldgSf, yearBuilt);
-  const { adu_score, bucket } = scores;
+  const baseScores = calcScore(lotSf, bldgSf, yearBuilt);
+  const alleyBonus = alley === true ? 10 : 0;
+  const adu_score = Math.min(100, baseScores.adu_score + alleyBonus);
+  const bucket = adu_score >= 65 ? "Likely" : adu_score >= 35 ? "Maybe" : "Unlikely";
 
   const bucketColor = bucket === "Likely" ? "#1b4332" : bucket === "Maybe" ? "#7c4a00" : "#7c1a1a";
   const barColor = bucket === "Likely" ? "#2d6a4f" : bucket === "Maybe" ? "#b45309" : "#b91c1c";
@@ -116,13 +123,19 @@ function ResultCard({ result, isSample }) {
     setEditing(null);
   }
 
+  const alleyBtnStyle = (active) => ({
+    padding: "8px 20px", fontSize: "13px", borderRadius: "6px", cursor: "pointer",
+    fontFamily: "Georgia, serif", border: "0.5px solid #2d6a4f",
+    background: active ? "#2d6a4f" : "white",
+    color: active ? "white" : "#2d6a4f",
+    fontWeight: active ? "500" : "400"
+  });
+
   return (
     <div style={{ border: "0.5px solid #d4ddd6", borderRadius: "12px", overflow: "hidden", background: "white", boxShadow: "0 2px 12px rgba(0,0,0,0.06)" }}>
-
-      {/* Score header */}
       <div style={{ background: bucketColor, padding: "18px 20px" }}>
         {isSample && <p style={{ fontSize: "10px", color: "rgba(255,255,255,0.5)", margin: "0 0 6px", letterSpacing: "0.1em", textTransform: "uppercase" }}>Sample result</p>}
-        {isEdited && <p style={{ fontSize: "10px", color: "rgba(255,255,255,0.65)", margin: "0 0 6px", letterSpacing: "0.08em" }}>⚠ Score reflects your edited values</p>}
+        {isEdited && <p style={{ fontSize: "10px", color: "rgba(255,255,255,0.65)", margin: "0 0 4px" }}>⚠ Score reflects your edited values</p>}
         <p style={{ fontSize: "10px", color: "rgba(255,255,255,0.55)", margin: "0 0 4px", letterSpacing: "0.08em", textTransform: "uppercase" }}>ADU potential score</p>
         <div style={{ display: "flex", alignItems: "baseline", gap: "10px" }}>
           <span style={{ fontSize: "42px", fontWeight: "500", color: "white", lineHeight: 1 }}>{adu_score}</span>
@@ -134,17 +147,13 @@ function ResultCard({ result, isSample }) {
         <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.5)", margin: "8px 0 0" }}>{result.address}, {result.city} CO</p>
       </div>
 
-      {/* See something wrong prompt */}
       {!isSample && (
-        <div style={{ padding: "10px 20px", background: "#fafaf8", borderBottom: "0.5px solid #e8ede9", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ padding: "10px 20px", background: "#fafaf8", borderBottom: "0.5px solid #e8ede9" }}>
           <span style={{ fontSize: "11px", color: "#888", fontStyle: "italic" }}>See something wrong? Fix it.</span>
-          {isEdited && <span style={{ fontSize: "10px", color: "#b45309" }}>Values have been edited</span>}
         </div>
       )}
 
-      {/* Score rows */}
       <div style={{ padding: "18px 20px" }}>
-
         {editing === "lot" ? (
           <EditField label="Lot size" value={lotSf} onChange={setLotSf} onDone={() => doneEditing("lot", setLotSf, lotSf)} unit="sq ft" />
         ) : (
@@ -152,7 +161,6 @@ function ResultCard({ result, isSample }) {
             note={lotSf >= 10000 ? "Large lot — excellent ADU potential" : lotSf >= 7500 ? "Good lot size — solid candidate" : lotSf >= 5000 ? "Adequate — may have constraints" : "Smaller lot — limited potential"}
             color={barColor} onEdit={!isSample ? () => setEditing("lot") : null} edited={editedFields.lot} />
         )}
-
         {editing === "bldg" ? (
           <EditField label="Building size" value={bldgSf} onChange={setBldgSf} onDone={() => doneEditing("bldg", setBldgSf, bldgSf)} unit="sq ft" />
         ) : (
@@ -160,7 +168,6 @@ function ResultCard({ result, isSample }) {
             note={ratioPct >= 70 ? "Low coverage — plenty of buildable space" : ratioPct >= 40 ? "Moderate coverage — some room to build" : "High coverage — limited space remaining"}
             color={barColor} onEdit={!isSample ? () => setEditing("bldg") : null} edited={editedFields.bldg} />
         )}
-
         {editing === "year" ? (
           <EditField label="Year built" value={yearBuilt} onChange={setYearBuilt} onDone={() => doneEditing("year", setYearBuilt, yearBuilt)} unit="" />
         ) : (
@@ -168,7 +175,6 @@ function ResultCard({ result, isSample }) {
             note={yearBuilt < 1960 ? "Older home — typical ADU candidate" : yearBuilt < 1990 ? "Mid-age home — good candidate" : "Newer home — may already be well-built out"}
             color={barColor} onEdit={!isSample ? () => setEditing("year") : null} edited={editedFields.year} />
         )}
-
         <div style={{ marginBottom: "14px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "5px" }}>
             <span style={{ fontSize: "13px", fontWeight: "500", color: "#1a1a1a" }}>Zoning</span>
@@ -181,7 +187,18 @@ function ResultCard({ result, isSample }) {
         </div>
       </div>
 
-      {/* CTAs */}
+      <div style={{ padding: "16px 20px", borderTop: "0.5px solid #e8ede9", background: "#fafaf8" }}>
+        <p style={{ fontSize: "13px", fontWeight: "500", color: "#1a1a1a", margin: "0 0 4px" }}>Does this property have alley access?</p>
+        <p style={{ fontSize: "11px", color: "#888", margin: "0 0 12px", lineHeight: 1.5 }}>Alley access makes ADU construction significantly easier and can unlock additional design options.</p>
+        <div style={{ display: "flex", gap: "8px" }}>
+          <button onClick={() => setAlley(true)} style={alleyBtnStyle(alley === true)}>Yes</button>
+          <button onClick={() => setAlley(false)} style={alleyBtnStyle(alley === false)}>No</button>
+          <button onClick={() => setAlley(null)} style={alleyBtnStyle(false)}>Not sure</button>
+        </div>
+        {alley === true && <p style={{ fontSize: "11px", color: "#2d6a4f", margin: "10px 0 0" }}>✅ +10 points added — alley access significantly increases ADU feasibility.</p>}
+        {alley === false && <p style={{ fontSize: "11px", color: "#888", margin: "10px 0 0" }}>No alley access — maximum score is 90. ADUs are still very buildable without alley access.</p>}
+      </div>
+
       <div style={{ padding: "14px 20px", borderTop: "0.5px solid #e8ede9", display: "flex", gap: "8px" }}>
         <a href="https://www.angi.com" target="_blank" rel="noopener noreferrer"
           style={{ flex: 1, padding: "10px", background: "#1b4332", color: "white", border: "none", borderRadius: "8px", fontSize: "12px", cursor: "pointer", textAlign: "center", textDecoration: "none", display: "block" }}>
@@ -202,43 +219,89 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [searched, setSearched] = useState(false);
+  const [suggestion, setSuggestion] = useState(null);
+  const [pendingGeo, setPendingGeo] = useState(null);
+
+  function runCsvLookup(userLat, userLng, inputAddress) {
+    Papa.parse("/parcels_final.csv", {
+      download: true,
+      header: true,
+      complete: (parsed) => {
+        const rows = parsed.data.filter(r => r.lat && r.lng);
+        const userNum = inputAddress.trim().match(/^\d+/)?.[0] || "";
+        const nearby = rows.filter(r => distance(userLat, userLng, parseFloat(r.lat), parseFloat(r.lng)) < 0.05);
+        let best = null;
+        if (userNum) best = nearby.find(r => r.address && r.address.startsWith(userNum)) || null;
+        if (!best) best = nearby[0] || null;
+        if (!best) {
+          setError("Your property may be in a zone that doesn't currently permit ADUs, or may not be covered by our current dataset.");
+        } else {
+          setResult(best);
+        }
+        setLoading(false);
+      }
+    });
+  }
 
   async function handleSearch() {
     if (!address.trim()) return;
     setLoading(true);
     setResult(null);
     setError("");
+    setSuggestion(null);
+    setPendingGeo(null);
     setSearched(true);
 
     try {
-      const geo = await fetch(`${NOMINATIM}?q=${encodeURIComponent(address + " Denver CO")}&format=json&limit=1`);
+      const geo = await fetch(`${NOMINATIM}?q=${encodeURIComponent(address + " Denver CO")}&format=json&limit=1&addressdetails=1`);
       const geoData = await geo.json();
-      if (!geoData.length) { setError("Address not found. Try adding a street number and Denver CO."); setLoading(false); return; }
+
+      if (!geoData.length) {
+        setError("Address not found. Please check the street number and name and try again.");
+        setLoading(false);
+        return;
+      }
+
       const userLat = parseFloat(geoData[0].lat);
       const userLng = parseFloat(geoData[0].lon);
 
-      Papa.parse("/parcels_final.csv", {
-        download: true,
-        header: true,
-        complete: (parsed) => {
-          const rows = parsed.data.filter(r => r.lat && r.lng);
-          const userNum = address.trim().match(/^\d+/)?.[0] || "";
-          const nearby = rows.filter(r => distance(userLat, userLng, parseFloat(r.lat), parseFloat(r.lng)) < 0.05);
-          let best = null;
-          if (userNum) best = nearby.find(r => r.address && r.address.startsWith(userNum)) || null;
-          if (!best) best = nearby[0] || null;
-          if (!best) {
-            setError("No ADU-eligible parcel found near that address. The property may be in a non-eligible zone.");
-          } else {
-            setResult(best);
-          }
-          setLoading(false);
-        }
-      });
+      if (!inDenver(userLat, userLng)) {
+        setError("This address doesn't appear to be in Denver. We currently only cover Denver properties.");
+        setLoading(false);
+        return;
+      }
+
+      const displayName = geoData[0].display_name || "";
+      const shortName = displayName.split(",").slice(0, 2).join(",").trim();
+      const userNum = address.trim().match(/^\d+/)?.[0] || "";
+      const inputClean = address.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+      const geoClean = shortName.toLowerCase().replace(/[^a-z0-9]/g, "");
+      const isCloseMatch = userNum && geoClean.startsWith(userNum) && inputClean.length >= 4 && !geoClean.includes(inputClean);
+
+      if (isCloseMatch) {
+        setSuggestion({ shortName, lat: userLat, lng: userLng });
+        setLoading(false);
+        return;
+      }
+
+      runCsvLookup(userLat, userLng, address);
+
     } catch {
       setError("Something went wrong. Please try again.");
       setLoading(false);
     }
+  }
+
+  function confirmSuggestion() {
+    setLoading(true);
+    setSuggestion(null);
+    runCsvLookup(suggestion.lat, suggestion.lng, suggestion.shortName);
+  }
+
+  function rejectSuggestion() {
+    setSuggestion(null);
+    setError("");
+    setSearched(false);
   }
 
   return (
@@ -271,13 +334,9 @@ export default function App() {
         <p style={{ fontSize: "14px", color: "#555", margin: "0 0 14px", lineHeight: 1.6 }}>
           Enter your address for an instant eligibility score based on real Denver parcel data — lot size, zoning, and building coverage.
         </p>
-        <input
-          value={address}
-          onChange={e => setAddress(e.target.value)}
-          onKeyDown={e => e.key === "Enter" && handleSearch()}
+        <input value={address} onChange={e => setAddress(e.target.value)} onKeyDown={e => e.key === "Enter" && handleSearch()}
           placeholder="Enter your Denver address..."
-          style={{ width: "100%", boxSizing: "border-box", padding: "13px 16px", fontSize: "14px", border: "1px solid #c4d4c8", borderRadius: "8px", background: "white", color: "#1a1a1a", marginBottom: "8px", fontFamily: "Georgia, serif", outline: "none" }}
-        />
+          style={{ width: "100%", boxSizing: "border-box", padding: "13px 16px", fontSize: "14px", border: "1px solid #c4d4c8", borderRadius: "8px", background: "white", color: "#1a1a1a", marginBottom: "8px", fontFamily: "Georgia, serif", outline: "none" }} />
         <button onClick={handleSearch} disabled={loading}
           style={{ width: "100%", padding: "13px", background: "#2d6a4f", color: "white", border: "none", borderRadius: "8px", fontSize: "14px", fontWeight: "500", cursor: "pointer", fontFamily: "Georgia, serif" }}>
           {loading ? "Checking..." : "Check My Property"}
@@ -286,6 +345,26 @@ export default function App() {
           No account required · Addresses not stored · No personal data collected
         </p>
       </div>
+
+      {/* DID YOU MEAN */}
+      {suggestion && (
+        <div style={{ padding: "20px" }}>
+          <div style={{ background: "white", border: "0.5px solid #c4d4c8", borderRadius: "10px", padding: "16px 20px" }}>
+            <p style={{ fontSize: "13px", color: "#555", margin: "0 0 4px" }}>We found a close match — is this your property?</p>
+            <p style={{ fontSize: "15px", fontWeight: "500", color: "#1a1a1a", margin: "0 0 14px" }}>{suggestion.shortName}</p>
+            <div style={{ display: "flex", gap: "8px" }}>
+              <button onClick={confirmSuggestion}
+                style={{ flex: 1, padding: "10px", background: "#2d6a4f", color: "white", border: "none", borderRadius: "8px", fontSize: "13px", cursor: "pointer", fontFamily: "Georgia, serif" }}>
+                Yes, that's it
+              </button>
+              <button onClick={rejectSuggestion}
+                style={{ flex: 1, padding: "10px", background: "white", border: "0.5px solid #c4d4c8", borderRadius: "8px", fontSize: "13px", cursor: "pointer", fontFamily: "Georgia, serif", color: "#555" }}>
+                No, try again
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ERROR */}
       {error && (
@@ -359,10 +438,12 @@ export default function App() {
       </div>
 
       {/* FOOTER */}
-      <div style={{ padding: "20px", textAlign: "center", background: "white" }}>
+      <div style={{ padding: "24px 20px", textAlign: "center", background: "white" }}>
         <p style={{ fontSize: "14px", fontWeight: "500", color: "#1a1a1a", margin: "0 0 4px" }}>myADUscore.com</p>
-        <p style={{ fontSize: "11px", color: "#aaa", margin: "0 0 6px" }}>Denver · More cities coming soon</p>
-        <p style={{ fontSize: "10px", color: "#ccc", margin: 0 }}>Data sourced from Denver Open Data Portal</p>
+        <p style={{ fontSize: "11px", color: "#aaa", margin: "0 0 12px" }}>Denver · More cities coming soon</p>
+        <p style={{ fontSize: "12px", color: "#888", margin: "0 0 4px" }}>Have a question?</p>
+        <a href="mailto:myaduscore@gmail.com" style={{ fontSize: "13px", color: "#2d6a4f", textDecoration: "none" }}>myaduscore@gmail.com</a>
+        <p style={{ fontSize: "10px", color: "#ccc", margin: "12px 0 0" }}>Data sourced from Denver Open Data Portal</p>
       </div>
 
     </div>
