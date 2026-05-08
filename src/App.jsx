@@ -253,7 +253,9 @@ export default function App() {
     setSearched(true);
 
     try {
-      const geo = await fetch(`${NOMINATIM}?q=${encodeURIComponent(address + " Denver CO")}&format=json&limit=1&addressdetails=1`);
+      const geo = await fetch(`${NOMINATIM}?q=${encodeURIComponent(address + " Denver CO")}&format=json&limit=1&addressdetails=1`, {
+  headers: { "User-Agent": "myADUscore.com - ADU eligibility tool" }
+});
       const geoData = await geo.json();
 
       if (!geoData.length) {
