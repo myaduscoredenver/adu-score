@@ -1,0 +1,167 @@
+import { useState } from "react";
+import Papa from "papaparse";
+
+const NOMINATIM = "https://nominatim.openstreetmap.org/search";
+
+function toRad(d) { return d * Math.PI / 180; }
+function distance(lat1, lng1, lat2, lng2) {
+  const R = 3959;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+export default function App() {
+  const [address, setAddress] = useState("");
+  const [result, setResult] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  async function handleSearch() {
+    if (!address.trim()) return;
+    setLoading(true);
+    setResult(null);
+    setError("");
+
+    try {
+      // Geocode address
+      const geo = await fetch(`${NOMINATIM}?q=${encodeURIComponent(address + " Denver CO")}&format=json&limit=1`);
+      const geoData = await geo.json();
+      if (!geoData.length) { setError("Address not found. Try adding Denver, CO."); setLoading(false); return; }
+      const userLat = parseFloat(geoData[0].lat);
+      const userLng = parseFloat(geoData[0].lon);
+
+      // Load and search CSV
+      Papa.parse("/parcels_final.csv", {
+        download: true,
+        header: true,
+        complete: (parsed) => {
+          const rows = parsed.data.filter(r => r.lat && r.lng);
+          let best = null, bestDist = Infinity;
+          for (const row of rows) {
+            const d = distance(userLat, userLng, parseFloat(row.lat), parseFloat(row.lng));
+            if (d < bestDist) { bestDist = d; best = row; }
+          }
+          if (!best || bestDist > 0.1) {
+            setError("No ADU-eligible parcel found near that address.");
+          } else {
+            setResult(best);
+          }
+          setLoading(false);
+        }
+      });
+    } catch {
+      setError("Something went wrong. Try again.");
+      setLoading(false);
+    }
+  }
+
+  const bucketColor = result?.bucket === "Likely" ? "#16a34a" : result?.bucket === "Maybe" ? "#d97706" : "#dc2626";
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#f8fafc", fontFamily: "system-ui, sans-serif" }}>
+      {/* Header */}
+      <div style={{ background: "#1e3a5f", color: "white", padding: "2rem", textAlign: "center" }}>
+        <h1 style={{ margin: 0, fontSize: "2rem", fontWeight: 700 }}>🏡 Denver ADU Score</h1>
+        <p style={{ margin: "0.5rem 0 0", opacity: 0.8 }}>Find out if your property is a good candidate for an Accessory Dwelling Unit</p>
+      </div>
+
+      {/* Search */}
+      <div style={{ maxWidth: 600, margin: "2rem auto", padding: "0 1rem" }}>
+        <div style={{ display: "flex", gap: "0.5rem" }}>
+          <input
+            value={address}
+            onChange={e => setAddress(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && handleSearch()}
+            placeholder="Enter your Denver address..."
+            style={{ flex: 1, padding: "0.75rem 1rem", fontSize: "1rem", border: "2px solid #cbd5e1", borderRadius: 8, outline: "none" }}
+          />
+          <button
+            onClick={handleSearch}
+            disabled={loading}
+            style={{ padding: "0.75rem 1.5rem", background: "#1e3a5f", color: "white", border: "none", borderRadius: 8, fontSize: "1rem", cursor: "pointer", fontWeight: 600 }}
+          >
+            {loading ? "..." : "Check"}
+          </button>
+        </div>
+
+        {error && <p style={{ color: "#dc2626", marginTop: "1rem" }}>{error}</p>}
+
+        {/* Result Card */}
+        {result && (
+          <div style={{ background: "white", borderRadius: 12, boxShadow: "0 4px 20px rgba(0,0,0,0.1)", marginTop: "1.5rem", overflow: "hidden" }}>
+            <div style={{ background: bucketColor, color: "white", padding: "1.5rem", textAlign: "center" }}>
+              <div style={{ fontSize: "3rem", fontWeight: 800 }}>{result.adu_score}/100</div>
+              <div style={{ fontSize: "1.5rem", fontWeight: 700, marginTop: "0.25rem" }}>ADU Potential: {result.bucket}</div>
+              <div style={{ opacity: 0.9, marginTop: "0.25rem" }}>{result.address}, {result.city}</div>
+            </div>
+
+            <div style={{ padding: "1.5rem" }}>
+              <h3 style={{ margin: "0 0 1rem", color: "#1e3a5f" }}>Score Breakdown</h3>
+
+              <ScoreRow
+                label="Lot Size"
+                value={`${Math.round(result.lot_sf).toLocaleString()} sq ft`}
+                score={parseInt(result.lot_score)}
+                good={result.lot_score >= 50}
+                reason={result.lot_score >= 75 ? "Large lot — excellent ADU potential" : result.lot_score >= 50 ? "Adequate lot size" : result.lot_score >= 20 ? "Smaller lot — may be limiting" : "Lot may be too small for ADU"}
+              />
+              <ScoreRow
+                label="Home vs Lot Coverage"
+                value={result.lot_sf > 0 ? `${Math.round((result.bldg_sf / result.lot_sf) * 100)}% covered` : "N/A"}
+                score={parseInt(result.ratio_score)}
+                good={result.ratio_score >= 60}
+                reason={result.ratio_score >= 60 ? "Low coverage — plenty of room to build" : result.ratio_score >= 30 ? "Moderate coverage" : "High coverage — limited space remaining"}
+              />
+              <ScoreRow
+                label="Year Built"
+                value={result.year_built > 0 ? result.year_built : "Unknown"}
+                score={parseInt(result.age_score)}
+                good={result.age_score >= 50}
+                reason={result.age_score >= 65 ? "Older home — typical ADU candidate" : result.age_score >= 30 ? "Mid-age home" : "Newer home — less likely underbuilt"}
+              />
+              <ScoreRow
+                label="Zoning"
+                value={result.zone}
+                score={100}
+                good={true}
+                reason="ADU permitted in this zone ✓"
+              />
+
+              {/* CTA */}
+              <div style={{ marginTop: "1.5rem", padding: "1rem", background: "#f0f9ff", borderRadius: 8, textAlign: "center" }}>
+                <p style={{ margin: "0 0 0.75rem", fontWeight: 600, color: "#1e3a5f" }}>Interested in building an ADU?</p>
+                <div style={{ display: "flex", gap: "0.5rem", justifyContent: "center", flexWrap: "wrap" }}>
+                  <a href="https://www.angi.com" target="_blank" rel="noopener noreferrer"
+                    style={{ padding: "0.5rem 1rem", background: "#1e3a5f", color: "white", borderRadius: 6, textDecoration: "none", fontSize: "0.9rem" }}>
+                    Get Builder Quotes
+                  </a>
+                  <a href="https://www.lendingtree.com/home/heloc/" target="_blank" rel="noopener noreferrer"
+                    style={{ padding: "0.5rem 1rem", background: "#16a34a", color: "white", borderRadius: 6, textDecoration: "none", fontSize: "0.9rem" }}>
+                    Explore HELOC Rates
+                  </a>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ScoreRow({ label, value, score, good, reason }) {
+  return (
+    <div style={{ display: "flex", alignItems: "flex-start", gap: "0.75rem", marginBottom: "1rem", paddingBottom: "1rem", borderBottom: "1px solid #f1f5f9" }}>
+      <span style={{ fontSize: "1.25rem" }}>{good ? "✅" : "⚠️"}</span>
+      <div style={{ flex: 1 }}>
+        <div style={{ display: "flex", justifyContent: "space-between" }}>
+          <span style={{ fontWeight: 600, color: "#334155" }}>{label}</span>
+          <span style={{ color: "#64748b" }}>{value}</span>
+        </div>
+        <div style={{ fontSize: "0.85rem", color: "#64748b", marginTop: "0.2rem" }}>{reason}</div>
+      </div>
+    </div>
+  );
+}
