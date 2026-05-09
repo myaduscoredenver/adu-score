@@ -1,7 +1,7 @@
 import { useState } from "react";
 import Papa from "papaparse";
 
-const CENSUS_GEO = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress";
+const CENSUS_GEO = "/api/geocode";
 
 function toRad(d) { return d * Math.PI / 180; }
 function distance(lat1, lng1, lat2, lng2) {
@@ -256,7 +256,7 @@ export default function App() {
     setSearched(true);
 
     try {
-      const geo = await fetch(`${CENSUS_GEO}?address=${encodeURIComponent(address + " CO")}&benchmark=2020&format=json`);
+      const geo = await fetch(`${CENSUS_GEO}?address=${encodeURIComponent(address + " CO")}`);
       const geoData = await geo.json();
       const match = geoData?.result?.addressMatches?.[0];
 
