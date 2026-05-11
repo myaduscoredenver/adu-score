@@ -1,5 +1,7 @@
 import { useState } from "react";
+import { Routes, Route, Link } from "react-router-dom";
 import Papa from "papaparse";
+import CityPage from "./CityPage";
 
 const CENSUS_GEO = "/api/geocode";
 
@@ -38,8 +40,7 @@ function calcScore(lot_sf, bldg_sf, year_built) {
   const ageScore = !year_built || year_built == 0 ? 50 : year_built >= 2000 ? 10 : year_built >= 1980 ? 30 : year_built >= 1960 ? 65 : 100;
   const raw = Math.round(lotScore * 0.45 + ratioScore * 0.35 + ageScore * 0.20);
   const score = Math.min(90, raw);
-  const bucket = score >= 65 ? "Likely" : score >= 35 ? "Maybe" : "Unlikely";
-  return { adu_score: score, bucket };
+  return { adu_score: score, bucket: score >= 65 ? "Likely" : score >= 35 ? "Maybe" : "Unlikely" };
 }
 
 const HouseIcon = () => (
@@ -157,27 +158,18 @@ function ResultCard({ result, isSample }) {
       )}
 
       <div style={{ padding: "18px 20px" }}>
-        {editing === "lot" ? (
-          <EditField label="Lot size" value={lotSf} onChange={setLotSf} onDone={() => doneEditing("lot", setLotSf, lotSf)} unit="sq ft" />
-        ) : (
+        {editing === "lot" ? <EditField label="Lot size" value={lotSf} onChange={setLotSf} onDone={() => doneEditing("lot", setLotSf, lotSf)} unit="sq ft" /> :
           <ScoreBar label="Lot size" value={`${Math.round(Math.min(lotSf,999999)).toLocaleString()} sf`} score={lotPct}
             note={lotSf >= 10000 ? "Large lot — excellent ADU potential" : lotSf >= 7500 ? "Good lot size — solid candidate" : lotSf >= 5000 ? "Adequate — may have constraints" : "Smaller lot — limited potential"}
-            color={barColor} onEdit={!isSample ? () => setEditing("lot") : null} edited={editedFields.lot} />
-        )}
-        {editing === "bldg" ? (
-          <EditField label="Building size" value={bldgSf} onChange={setBldgSf} onDone={() => doneEditing("bldg", setBldgSf, bldgSf)} unit="sq ft" />
-        ) : (
+            color={barColor} onEdit={!isSample ? () => setEditing("lot") : null} edited={editedFields.lot} />}
+        {editing === "bldg" ? <EditField label="Building size" value={bldgSf} onChange={setBldgSf} onDone={() => doneEditing("bldg", setBldgSf, bldgSf)} unit="sq ft" /> :
           <ScoreBar label="Coverage ratio" value={lotSf > 0 ? `${Math.round((bldgSf / lotSf) * 100)}%` : "N/A"} score={ratioPct}
             note={ratioPct >= 70 ? "Low coverage — plenty of buildable space" : ratioPct >= 40 ? "Moderate coverage — some room to build" : "High coverage — limited space remaining"}
-            color={barColor} onEdit={!isSample ? () => setEditing("bldg") : null} edited={editedFields.bldg} />
-        )}
-        {editing === "year" ? (
-          <EditField label="Year built" value={yearBuilt} onChange={setYearBuilt} onDone={() => doneEditing("year", setYearBuilt, yearBuilt)} unit="" />
-        ) : (
+            color={barColor} onEdit={!isSample ? () => setEditing("bldg") : null} edited={editedFields.bldg} />}
+        {editing === "year" ? <EditField label="Year built" value={yearBuilt} onChange={setYearBuilt} onDone={() => doneEditing("year", setYearBuilt, yearBuilt)} unit="" /> :
           <ScoreBar label="Year built" value={yearBuilt > 0 ? yearBuilt : "Unknown"} score={agePct}
             note={yearBuilt < 1960 ? "Older home — typical ADU candidate" : yearBuilt < 1990 ? "Mid-age home — good candidate" : "Newer home — may already be well-built out"}
-            color={barColor} onEdit={!isSample ? () => setEditing("year") : null} edited={editedFields.year} />
-        )}
+            color={barColor} onEdit={!isSample ? () => setEditing("year") : null} edited={editedFields.year} />}
         <div style={{ marginBottom: "14px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "5px" }}>
             <span style={{ fontSize: "13px", fontWeight: "500", color: "#1a1a1a" }}>Zoning</span>
@@ -216,20 +208,47 @@ function ResultCard({ result, isSample }) {
   );
 }
 
-export default function App() {
+function Nav() {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 20px", background: "white", borderBottom: "0.5px solid #e0ddd8", position: "sticky", top: 0, zIndex: 100 }}>
+      <Link to="/" style={{ textDecoration: "none" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "2px" }}>
+          <span style={{ fontSize: "11px", color: "#2d6a4f", letterSpacing: "0.15em", textTransform: "uppercase", fontFamily: "Georgia, serif" }}>my</span>
+          <span style={{ fontSize: "18px", fontWeight: "400", color: "#1a1a1a", fontFamily: "Georgia, serif" }}>ADUscore</span>
+          <span style={{ fontSize: "18px", color: "#2d6a4f", fontFamily: "Georgia, serif" }}>.com</span>
+        </div>
+      </Link>
+      <div style={{ position: "relative" }}>
+        <button onClick={() => setOpen(!open)} style={{ background: "none", border: "0.5px solid #c4d4c8", borderRadius: "6px", padding: "6px 12px", fontSize: "12px", cursor: "pointer", color: "#1a1a1a", fontFamily: "Georgia, serif" }}>
+          Cities ▾
+        </button>
+        {open && (
+          <div style={{ position: "absolute", right: 0, top: "110%", background: "white", border: "0.5px solid #c4d4c8", borderRadius: "8px", width: "160px", zIndex: 200, boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }}>
+            {["denver","lakewood","arvada","golden","wheat-ridge","littleton"].map(slug => (
+              <Link key={slug} to={`/${slug}`} onClick={() => setOpen(false)}
+                style={{ display: "block", padding: "10px 14px", fontSize: "13px", color: "#1a1a1a", textDecoration: "none", borderBottom: "0.5px solid #f0f0f0", fontFamily: "Georgia, serif", textTransform: "capitalize" }}>
+                {slug.replace("-", " ")}
+              </Link>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function HomePage() {
   const [address, setAddress] = useState("");
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [searched, setSearched] = useState(false);
   const [suggestion, setSuggestion] = useState(null);
-  const [region, setRegion] = useState(null);
 
   function runCsvLookup(userLat, userLng, inputAddress, reg) {
-    const csvFile = CSV[reg];
-    Papa.parse(csvFile, {
-      download: true,
-      header: true,
+    Papa.parse(CSV[reg], {
+      download: true, header: true,
       complete: (parsed) => {
         const rows = parsed.data.filter(r => r.lat && r.lng);
         const userNum = inputAddress.trim().match(/^\d+/)?.[0] || "";
@@ -239,9 +258,7 @@ export default function App() {
         if (!best) best = nearby[0] || null;
         if (!best) {
           setError("Your property may not be covered by our current dataset, or may be in a zone that doesn't permit ADUs.");
-        } else {
-          setResult(best);
-        }
+        } else { setResult(best); }
         setLoading(false);
       }
     });
@@ -249,83 +266,32 @@ export default function App() {
 
   async function handleSearch() {
     if (!address.trim()) return;
-    setLoading(true);
-    setResult(null);
-    setError("");
-    setSuggestion(null);
-    setSearched(true);
-
+    setLoading(true); setResult(null); setError(""); setSuggestion(null); setSearched(true);
     try {
       const geo = await fetch(`${CENSUS_GEO}?address=${encodeURIComponent(address + " CO")}`);
       const geoData = await geo.json();
       const match = geoData?.result?.addressMatches?.[0];
-
-      if (!match) {
-        setError("Address not found. Please check the street number and name and try again.");
-        setLoading(false);
-        return;
-      }
-
+      if (!match) { setError("Address not found. Please check the street number and name and try again."); setLoading(false); return; }
       const userLat = parseFloat(match.coordinates.y);
       const userLng = parseFloat(match.coordinates.x);
       const reg = getRegion(userLat, userLng);
-
-      if (!reg) {
-        setError("We currently cover Denver and Jefferson County (Lakewood, Arvada, Golden, Littleton, Wheat Ridge). More cities coming soon.");
-        setLoading(false);
-        return;
-      }
-
-      setRegion(reg);
+      if (!reg) { setError("We currently cover Denver and Jefferson County (Lakewood, Arvada, Golden, Littleton, Wheat Ridge). More cities coming soon."); setLoading(false); return; }
       const matchedAddress = match.matchedAddress || address;
       const inputNum = address.trim().match(/^\d+/)?.[0] || "";
       const matchNum = matchedAddress.match(/^\d+/)?.[0] || "";
       const inputStreet = address.toLowerCase().replace(/[^a-z]/g, "").slice(0, 6);
       const matchStreet = matchedAddress.toLowerCase().replace(/[^a-z]/g, "").slice(0, 6);
-      const isCloseMatch = inputNum === matchNum && inputStreet !== matchStreet;
-
-      if (isCloseMatch) {
+      if (inputNum === matchNum && inputStreet !== matchStreet) {
         setSuggestion({ shortName: matchedAddress.split(",")[0], lat: userLat, lng: userLng, reg });
-        setLoading(false);
-        return;
+        setLoading(false); return;
       }
-
       runCsvLookup(userLat, userLng, address, reg);
-
-    } catch {
-      setError("Something went wrong. Please try again.");
-      setLoading(false);
-    }
+    } catch { setError("Something went wrong. Please try again."); setLoading(false); }
   }
-
-  function confirmSuggestion() {
-    setLoading(true);
-    const s = suggestion;
-    setSuggestion(null);
-    runCsvLookup(s.lat, s.lng, s.shortName, s.reg);
-  }
-
-  function rejectSuggestion() {
-    setSuggestion(null);
-    setError("");
-    setSearched(false);
-  }
-
-  const coverageText = "Denver · Lakewood · Arvada · Golden · Littleton · Wheat Ridge · More cities coming soon";
 
   return (
     <div style={{ fontFamily: "Georgia, serif", background: "#f7f5f0", minHeight: "100vh" }}>
-
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "16px 20px", background: "white", borderBottom: "0.5px solid #e0ddd8", position: "sticky", top: 0, zIndex: 100 }}>
-        <div style={{ textAlign: "center" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "2px" }}>
-            <span style={{ fontSize: "11px", color: "#2d6a4f", letterSpacing: "0.15em", textTransform: "uppercase" }}>my</span>
-            <span style={{ fontSize: "20px", fontWeight: "400", color: "#1a1a1a", letterSpacing: "-0.01em" }}>ADUscore</span>
-            <span style={{ fontSize: "20px", color: "#2d6a4f" }}>.com</span>
-          </div>
-          <div style={{ height: "1px", background: "linear-gradient(to right, transparent, #2d6a4f, transparent)", marginTop: "3px", width: "140px" }}></div>
-        </div>
-      </div>
+      <Nav />
 
       <div style={{ position: "relative", width: "100%", height: "260px", overflow: "hidden" }}>
         <img src="/hero.png" alt="Denver craftsman home with ADU cottage at golden hour" style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "center 40%" }} />
@@ -337,9 +303,7 @@ export default function App() {
       </div>
 
       <div style={{ padding: "20px", background: "white", borderBottom: "0.5px solid #e0ddd8" }}>
-        <p style={{ fontSize: "14px", color: "#555", margin: "0 0 14px", lineHeight: 1.6 }}>
-          Enter your address for an instant eligibility score based on real parcel data — lot size, zoning, and building coverage.
-        </p>
+        <p style={{ fontSize: "14px", color: "#555", margin: "0 0 14px", lineHeight: 1.6 }}>Enter your address for an instant eligibility score based on real parcel data — lot size, zoning, and building coverage.</p>
         <input value={address} onChange={e => setAddress(e.target.value)} onKeyDown={e => e.key === "Enter" && handleSearch()}
           placeholder="Enter your address..."
           style={{ width: "100%", boxSizing: "border-box", padding: "13px 16px", fontSize: "14px", border: "1px solid #c4d4c8", borderRadius: "8px", background: "white", color: "#1a1a1a", marginBottom: "8px", fontFamily: "Georgia, serif", outline: "none" }} />
@@ -347,9 +311,7 @@ export default function App() {
           style={{ width: "100%", padding: "13px", background: "#2d6a4f", color: "white", border: "none", borderRadius: "8px", fontSize: "14px", fontWeight: "500", cursor: "pointer", fontFamily: "Georgia, serif" }}>
           {loading ? "Checking..." : "Check My Property"}
         </button>
-        <p style={{ fontSize: "10px", color: "#aaa", textAlign: "center", margin: "8px 0 0", lineHeight: 1.5 }}>
-          No account required · Addresses not stored · No personal data collected
-        </p>
+        <p style={{ fontSize: "10px", color: "#aaa", textAlign: "center", margin: "8px 0 0", lineHeight: 1.5 }}>No account required · Addresses not stored · No personal data collected</p>
       </div>
 
       {suggestion && (
@@ -358,38 +320,25 @@ export default function App() {
             <p style={{ fontSize: "13px", color: "#555", margin: "0 0 4px" }}>We found a close match — is this your property?</p>
             <p style={{ fontSize: "15px", fontWeight: "500", color: "#1a1a1a", margin: "0 0 14px" }}>{suggestion.shortName}</p>
             <div style={{ display: "flex", gap: "8px" }}>
-              <button onClick={confirmSuggestion} style={{ flex: 1, padding: "10px", background: "#2d6a4f", color: "white", border: "none", borderRadius: "8px", fontSize: "13px", cursor: "pointer", fontFamily: "Georgia, serif" }}>Yes, that's it</button>
-              <button onClick={rejectSuggestion} style={{ flex: 1, padding: "10px", background: "white", border: "0.5px solid #c4d4c8", borderRadius: "8px", fontSize: "13px", cursor: "pointer", fontFamily: "Georgia, serif", color: "#555" }}>No, try again</button>
+              <button onClick={() => { setLoading(true); const s = suggestion; setSuggestion(null); runCsvLookup(s.lat, s.lng, s.shortName, s.reg); }}
+                style={{ flex: 1, padding: "10px", background: "#2d6a4f", color: "white", border: "none", borderRadius: "8px", fontSize: "13px", cursor: "pointer", fontFamily: "Georgia, serif" }}>Yes, that's it</button>
+              <button onClick={() => { setSuggestion(null); setError(""); setSearched(false); }}
+                style={{ flex: 1, padding: "10px", background: "white", border: "0.5px solid #c4d4c8", borderRadius: "8px", fontSize: "13px", cursor: "pointer", fontFamily: "Georgia, serif", color: "#555" }}>No, try again</button>
             </div>
           </div>
         </div>
       )}
 
-      {error && (
-        <div style={{ padding: "20px" }}>
-          <p style={{ color: "#b91c1c", fontSize: "13px", margin: 0, padding: "12px 16px", background: "#fef2f2", borderRadius: "8px", border: "0.5px solid #fecaca" }}>{error}</p>
-        </div>
-      )}
-
-      {result && (
-        <div style={{ padding: "20px", background: "#f7f5f0" }}>
-          <ResultCard result={result} isSample={false} />
-        </div>
-      )}
-
-      {!searched && (
-        <div style={{ padding: "20px", background: "#f7f5f0", borderBottom: "0.5px solid #e0ddd8" }}>
-          <ResultCard result={SAMPLE} isSample={true} />
-        </div>
-      )}
+      {error && <div style={{ padding: "20px" }}><p style={{ color: "#b91c1c", fontSize: "13px", margin: 0, padding: "12px 16px", background: "#fef2f2", borderRadius: "8px", border: "0.5px solid #fecaca" }}>{error}</p></div>}
+      {result && <div style={{ padding: "20px", background: "#f7f5f0" }}><ResultCard result={result} isSample={false} /></div>}
+      {!searched && <div style={{ padding: "20px", background: "#f7f5f0", borderBottom: "0.5px solid #e0ddd8" }}><ResultCard result={SAMPLE} isSample={true} /></div>}
 
       <div style={{ padding: "28px 20px", background: "white", borderBottom: "0.5px solid #e0ddd8" }}>
         <p style={{ fontSize: "11px", letterSpacing: "0.1em", color: "#aaa", textTransform: "uppercase", margin: "0 0 20px", textAlign: "center" }}>How it works</p>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "16px", textAlign: "center" }}>
-          {[
-            { icon: <HouseIcon />, title: "Enter your address", sub: "Denver metro residential addresses" },
+          {[{ icon: <HouseIcon />, title: "Enter your address", sub: "Denver metro residential addresses" },
             { icon: <ChartIcon />, title: "We score your parcel", sub: "Lot size, zoning, and coverage" },
-            { icon: <ClipboardIcon />, title: "Get your result", sub: "Likely, Maybe, or Unlikely" },
+            { icon: <ClipboardIcon />, title: "Get your result", sub: "Likely, Maybe, or Unlikely" }
           ].map((s, i) => (
             <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "10px" }}>
               <div style={{ width: "60px", height: "60px", borderRadius: "50%", background: "#f0f7f4", border: "0.5px solid #c4d4c8", display: "flex", alignItems: "center", justifyContent: "center" }}>{s.icon}</div>
@@ -421,20 +370,31 @@ export default function App() {
 
       <div style={{ padding: "20px", background: "#f7f5f0", borderBottom: "0.5px solid #e0ddd8" }}>
         <div style={{ borderLeft: "2px solid #c4d4c8", paddingLeft: "12px" }}>
-          <p style={{ fontSize: "11px", color: "#999", margin: 0, lineHeight: 1.7 }}>
-            <span style={{ fontWeight: "500", color: "#666" }}>Informational use only.</span> Scores are estimates based on publicly available parcel and zoning data. This tool is not a substitute for professional planning advice. Always verify eligibility directly with your local Community Planning and Development department before making any decisions. Results may not reflect HOA restrictions, easements, historic overlays, or recent code changes.
-          </p>
+          <p style={{ fontSize: "11px", color: "#999", margin: 0, lineHeight: 1.7 }}><span style={{ fontWeight: "500", color: "#666" }}>Informational use only.</span> Scores are estimates based on publicly available parcel and zoning data. This tool is not a substitute for professional planning advice. Always verify eligibility directly with your local Community Planning and Development department before making any decisions. Results may not reflect HOA restrictions, easements, historic overlays, or recent code changes.</p>
         </div>
       </div>
 
       <div style={{ padding: "24px 20px", textAlign: "center", background: "white" }}>
         <p style={{ fontSize: "14px", fontWeight: "500", color: "#1a1a1a", margin: "0 0 4px" }}>myADUscore.com</p>
-        <p style={{ fontSize: "11px", color: "#aaa", margin: "0 0 12px" }}>{coverageText}</p>
+        <p style={{ fontSize: "11px", color: "#aaa", margin: "0 0 12px" }}>Denver · Lakewood · Arvada · Golden · Wheat Ridge · Littleton · More cities coming soon</p>
         <p style={{ fontSize: "12px", color: "#888", margin: "0 0 4px" }}>Have a question?</p>
         <a href="mailto:myaduscore@gmail.com" style={{ fontSize: "13px", color: "#2d6a4f", textDecoration: "none" }}>myaduscore@gmail.com</a>
         <p style={{ fontSize: "10px", color: "#ccc", margin: "12px 0 0" }}>Data sourced from Denver Open Data Portal and Jefferson County</p>
       </div>
-
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <Routes>
+      <Route path="/" element={<HomePage />} />
+      <Route path="/denver" element={<CityPage slug="denver" />} />
+      <Route path="/lakewood" element={<CityPage slug="lakewood" />} />
+      <Route path="/arvada" element={<CityPage slug="arvada" />} />
+      <Route path="/golden" element={<CityPage slug="golden" />} />
+      <Route path="/wheat-ridge" element={<CityPage slug="wheat-ridge" />} />
+      <Route path="/littleton" element={<CityPage slug="littleton" />} />
+    </Routes>
   );
 }
